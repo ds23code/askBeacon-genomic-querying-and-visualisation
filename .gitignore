@@ -1,0 +1,25 @@
+# Bytecode
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+venv312/
+.env
+
+# Outputs and runtime files
+outputs/
+memory.json
+*.log
+*.png
+*.csv
+*.txt
+
+# Ontology index (optional)
+ontology/ontology.index
+ontology/ontology_meta.json
+
+# OS & IDE
+.DS_Store
+.vscode/
+.idea/
