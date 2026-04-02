@@ -3,6 +3,7 @@ agents/executor_agent.py
 ------------------------
 Agent 4 — Code Executor / Visualisation Generator.
 Inspects CSV -> generates matplotlib/pandas code -> validates safety -> executes -> saves plot.
+Now with improved filtering syntax, broader plot support, and automatic error recovery.
 """
 
 import re
@@ -18,13 +19,18 @@ from config.settings import OLLAMA_BASE_URL, OLLAMA_MODEL, OUTPUTS_DIR
 
 OUTPUTS_DIR.mkdir(exist_ok=True)
 
-# Dangerous patterns that are blocked in generated code
+# Dangerous patterns blocked for security
 _BLOCKED_PATTERNS = [
     r"\bsubprocess\b", r"\bos\.system\b", r"\bos\.popen\b",
     r"\beval\b", r"\bexec\b", r"\b__import__\b",
     r"\brequests\b", r"\burllib\b", r"\bsocket\b",
     r"\bshutil\b", r"\brmdir\b", r"\bunlink\b", r"\bos\.remove\b",
 ]
+
+# Pattern to catch chained comparisons like 1500000 <= df['POS'] <= 1510000
+_CHAINED_COMPARISON = re.compile(
+    r"(\d+(?:\.\d+)?)\s*<=\s*([\w.\[\]'\"_]+)\s*<=\s*(\d+(?:\.\d+)?)"
+)
 
 
 def _ollama(prompt: str, system: str = "") -> str:
@@ -57,10 +63,24 @@ def _extract_code_block(raw: str) -> str:
         code = m.group(1).strip()
         code = re.sub(r"^```|```$", "", code)
         return code
-    # If no code block but it looks like Python, assume whole response is code
     if "import" in raw or "plt." in raw or "pd." in raw or "df." in raw:
         return raw.strip()
     return ""
+
+
+def _fix_chained_comparisons(code: str) -> str:
+    """
+    Rewrite expressions like 'lower <= df['col'] <= upper' into
+    '(df['col'] >= lower) & (df['col'] <= upper)' to avoid pandas ambiguity.
+    """
+    def replacer(match):
+        lower = match.group(1)
+        col_expr = match.group(2)
+        upper = match.group(3)
+        return f"({col_expr} >= {lower}) & ({col_expr} <= {upper})"
+
+    # Apply to all occurrences in the code
+    return _CHAINED_COMPARISON.sub(replacer, code)
 
 
 def _inspect_csv(csv_path: Path) -> dict:
@@ -102,8 +122,9 @@ def _generate_code(csv_path: Path, request: str, csv_info: dict,
     sample_rows = csv_info.get("sample_rows", [])[:5]
     sample_str = "\n".join(str(r) for r in sample_rows)
     has_af = csv_info.get("has_af", False)
+    numeric_cols = csv_info.get("numeric_cols", [])
+    categorical_cols = csv_info.get("categorical_cols", [])
 
-    # Build column description
     col_desc = "\n".join(f"- {col}" for col in columns[:20])
 
     system = (
@@ -119,27 +140,27 @@ def _generate_code(csv_path: Path, request: str, csv_info: dict,
         "- Import ONLY pandas, matplotlib, numpy\n"
         "- Output ONLY Python code — no explanation\n"
         f"- The dataset has {row_count} rows.\n"
-        "- If there is only 1 row, create a simple bar chart with one bar showing the allele frequency.\n"
-        "- **IMPORTANT**: The CSV columns are listed below. Use only these columns.\n"
+        "- **CRITICAL FOR FILTERING**: Always use the pattern `(df['col'] >= lower) & (df['col'] <= upper)`. "
+        "Never write `lower <= df['col'] <= upper` because pandas cannot evaluate that.\n"
+        "- If the dataset is small (<=10 rows), a bar chart or point plot is fine.\n"
+        "- If the dataset is larger, consider histograms or scatter plots.\n"
+        "- For bar charts with counts, use `df['categorical_column'].value_counts().plot(kind='bar')`.\n"
+        "- For allele frequency, extract AF from INFO column if present, then plot.\n"
         f"- Available columns: {', '.join(columns)}\n"
     )
     if has_af:
         system += (
-            "- The INFO column contains key=value pairs like 'AF=0.0006;...'. To get the allele frequency for each variant, extract it like this:\n"
-            "df['AF'] = df['INFO'].str.extract(r'AF=([0-9.]+)').astype(float)\n"
-            "- Then plot the AF values. If there is only one row, create a bar chart with the AF value.\n"
+            "- The INFO column contains key=value pairs like 'AF=0.0006;...'. Extract AF with:\n"
+            "  df['AF'] = df['INFO'].str.extract(r'AF=([0-9.]+)').astype(float)\n"
         )
-    else:
-        numeric_cols = csv_info.get("numeric_cols", [])
-        if numeric_cols:
-            system += f"- Numeric columns available: {numeric_cols}. Use them for plotting.\n"
-        categorical_cols = csv_info.get("categorical_cols", [])
-        if categorical_cols:
-            system += f"- Categorical columns available: {categorical_cols}. For a bar chart, you could count values in a categorical column.\n"
+    if numeric_cols:
+        system += f"- Numeric columns: {numeric_cols}. Use them for y-axis values.\n"
+    if categorical_cols:
+        system += f"- Categorical columns: {categorical_cols}. Use them for grouping or x-axis labels.\n"
 
     prompt = (
         f"CSV file: {csv_path}\n"
-        f"Columns (use only these):\n{col_desc}\n"
+        f"Columns:\n{col_desc}\n"
         f"Total rows: {row_count}\n"
         f"Sample rows (first 5):\n{sample_str}\n\n"
         f'User request: "{request}"\n\n'
@@ -148,6 +169,8 @@ def _generate_code(csv_path: Path, request: str, csv_info: dict,
     code = _extract_code_block(_ollama(prompt, system))
     # Remove any stray plt.style.use lines
     code = re.sub(r"plt\.style\.use\([^)]*\)", "# style removed to avoid errors", code)
+    # Fix chained comparisons
+    code = _fix_chained_comparisons(code)
     return code
 
 
@@ -187,12 +210,12 @@ def run_executor(request: str, csv_path: str | Path | None = None,
     Generate and execute visualisation code based on the request and CSV data.
 
     Args:
-        request: Natural language visualisation request (e.g., "Plot allele frequencies").
-        csv_path: Path to CSV file. If None, auto‑detect.
+        request: Natural language visualisation request.
+        csv_path: Path to CSV file. If None, auto-detect.
         verbose: Print progress messages.
 
     Returns:
-        A dictionary with keys: success, plot_path, code_path, code, output, error.
+        Dict with keys: success, plot_path, code_path, code, output, error.
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if verbose:
@@ -203,7 +226,6 @@ def run_executor(request: str, csv_path: str | Path | None = None,
     if csv_path:
         data_file = Path(csv_path)
     else:
-        # Prefer VCF CSV that contains "_vcf" in the name
         data_file = _find_latest_csv("*_vcf.csv")
         if not data_file:
             data_file = _find_latest_csv("*.csv")
@@ -238,8 +260,8 @@ def run_executor(request: str, csv_path: str | Path | None = None,
             if verbose:
                 print(f"   Validation failed: {reason}. Retrying with simplified prompt...")
             attempts += 1
-            # The loop will re‑call _generate_code with the same arguments; the LLM may
-            # produce a different code on second attempt due to temperature variation.
+            # For the second attempt, we could modify the system prompt, but the function
+            # already uses the same prompt; the retry may still help due to temperature randomness.
 
     if not code or not safe:
         if verbose:

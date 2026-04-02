@@ -22,4 +22,4 @@ ontology/ontology_meta.json
 # OS & IDE
 .DS_Store
 .vscode/
-.idea/
+.idea/*.tbi
