@@ -12,9 +12,11 @@ Type a question in plain English. The system selects the right AI agents, fetche
 
 **Example queries:**
 ```
+
 "Find variants on chromosome 2 between 1.5M and 1.501M and plot allele frequencies"
 "Get male individuals with regional failure"
 "How many Europeans have breast cancer?"
+
 ```
 
 The system automatically:
@@ -32,7 +34,7 @@ The system automatically:
 ```bash
 # Create a virtual environment
 python3.12 -m venv venv312
-source venv312/bin/activate   # or `venv312\Scripts\activate` on Windows
+source venv312/bin/activate   # or `venv312\\Scripts\\activate` on Windows
 
 # Install Python dependencies
 pip install -r requirements.txt
@@ -53,12 +55,15 @@ python ontology/build_vector_db.py
 ### 2. Run the system
 
 **Web UI (recommended):**
+
 ```bash
 streamlit run app.py
 ```
-Then open http://localhost:8501 in your browser.
+
+Then open [http://localhost:8501](http://localhost:8501/) in your browser.
 
 **Command line:**
+
 ```bash
 # Run individual agents
 python main.py -a vcf -q "Get variants on chromosome 2 from 5.5M to 5.51M"
@@ -75,7 +80,7 @@ python main.py -a both -q "Get variants on chromosome 5 for European males"
 ## Agent Overview
 
 | Agent | Purpose |
-|-------|---------|
+| --- | --- |
 | **VCF** | Fetches variant data from the 1000 Genomes Project using bcftools (ReAct loop) |
 | **Beacon** | Builds a valid Beacon v2 JSON query from natural language |
 | **Joiner** | Merges VCF output and Beacon query into a unified table |
@@ -119,10 +124,10 @@ genomic-agents/
 All settings are in `config/settings.py`:
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| --- | --- | --- |
 | `OLLAMA_MODEL` | `"llama3"` | LLM model (must be pulled) |
-| `OLLAMA_BASE_URL` | `"http://localhost:11434"` | Ollama server URL |
-| `BEACON_BASE_URL` | `"https://beacon.demo.umccr.org"` | sBeacon endpoint |
+| `OLLAMA_BASE_URL` | `"<http://localhost:11434>"` | Ollama server URL |
+| `BEACON_BASE_URL` | `"<https://beacon.demo.umccr.org>"` | sBeacon endpoint |
 | `ONTOLOGY_STRATEGY` | `"faiss"` | `"faiss"` (vector search) or `"vectorless"` (prompt-based) |
 | `DEFAULT_VCF_FILE` | chr1 S3 URL | Fallback VCF file |
 
@@ -140,8 +145,9 @@ All settings are in `config/settings.py`:
 ## Verification
 
 To verify VCF output against UCSC Genome Browser:
+
 1. Open any `.csv` in `outputs/` – note a `POS` value and `CHROM`.
-2. Go to [genome.ucsc.edu](https://genome.ucsc.edu) and set assembly to **hg19 / GRCh37**.
+2. Go to [genome.ucsc.edu](https://genome.ucsc.edu/) and set assembly to **hg19 / GRCh37**.
 3. Search: `chr2:5,500,000-5,510,000` (adjust chromosome and range).
 4. Click the `Common dbSNP(155)` track – the REF/ALT should match.
 
@@ -154,7 +160,3 @@ To verify VCF output against UCSC Genome Browser:
 - Add session history display in Streamlit sidebar.
 
 ---
-
-## License
-
-This project is for research and educational purposes. See LICENSE file for details.
